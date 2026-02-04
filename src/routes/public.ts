@@ -31,25 +31,28 @@ publicRoutes.get('/logo-small.png', (c) => {
 });
 
 // GET /api/status - Public health check for gateway status (no auth required)
+// Note: Intentionally minimal response to avoid leaking internal details
 publicRoutes.get('/api/status', async (c) => {
   const sandbox = c.get('sandbox');
-  
+
   try {
     const process = await findExistingMoltbotProcess(sandbox);
     if (!process) {
       return c.json({ ok: false, status: 'not_running' });
     }
-    
+
     // Process exists, check if it's actually responding
     // Try to reach the gateway with a short timeout
     try {
       await process.waitForPort(18789, { mode: 'tcp', timeout: 5000 });
-      return c.json({ ok: true, status: 'running', processId: process.id });
+      return c.json({ ok: true, status: 'running' });
     } catch {
-      return c.json({ ok: false, status: 'not_responding', processId: process.id });
+      return c.json({ ok: false, status: 'not_responding' });
     }
   } catch (err) {
-    return c.json({ ok: false, status: 'error', error: err instanceof Error ? err.message : 'Unknown error' });
+    // Don't leak internal error details
+    console.error('[api/status] Error checking gateway:', err);
+    return c.json({ ok: false, status: 'error' });
   }
 });
 

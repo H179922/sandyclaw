@@ -1837,16 +1837,22 @@ function sendEvent(ws: WebSocket, method: string, params?: Record<string, unknow
 }
 
 /**
- * Constant-time string comparison to prevent timing attacks
+ * Constant-time string comparison to prevent timing attacks.
+ *
+ * SECURITY: Always performs the same number of operations regardless of
+ * input lengths to avoid leaking length information via timing.
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  // Track length mismatch but don't return early (would leak length)
+  let result = a.length ^ b.length;
+
+  // Always iterate over the longer string to avoid length leakage
+  const maxLen = Math.max(a.length, b.length);
+  for (let i = 0; i < maxLen; i++) {
+    // Use 0 for out-of-bounds access (safe default that will cause mismatch)
+    const charA = i < a.length ? a.charCodeAt(i) : 0;
+    const charB = i < b.length ? b.charCodeAt(i) : 0;
+    result |= charA ^ charB;
   }
   return result === 0;
 }

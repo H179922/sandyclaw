@@ -14,16 +14,38 @@ export interface AccessMiddlewareOptions {
 
 /**
  * Check if running in development mode (skips CF Access auth + device pairing)
+ *
+ * SECURITY: DEV_MODE is blocked if CF Access is configured, preventing
+ * accidental deployment to production with auth bypassed.
  */
 export function isDevMode(env: MoltbotEnv): boolean {
-  return env.DEV_MODE === 'true';
+  if (env.DEV_MODE === 'true') {
+    // Block DEV_MODE if CF Access is configured (indicates production)
+    if (env.CF_ACCESS_TEAM_DOMAIN && env.CF_ACCESS_AUD) {
+      console.error('SECURITY: DEV_MODE blocked - CF Access is configured. Remove DEV_MODE for production.');
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
  * Check if running in E2E test mode (skips CF Access auth but keeps device pairing)
+ *
+ * SECURITY: E2E_TEST_MODE is blocked if CF Access is configured, preventing
+ * accidental deployment to production with auth bypassed.
  */
 export function isE2ETestMode(env: MoltbotEnv): boolean {
-  return env.E2E_TEST_MODE === 'true';
+  if (env.E2E_TEST_MODE === 'true') {
+    // Block E2E_TEST_MODE if CF Access is configured (indicates production)
+    if (env.CF_ACCESS_TEAM_DOMAIN && env.CF_ACCESS_AUD) {
+      console.error('SECURITY: E2E_TEST_MODE blocked - CF Access is configured. Remove E2E_TEST_MODE for production.');
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 /**

@@ -282,7 +282,7 @@ if (isOpenAI) {
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
+// Note: Config not logged to avoid leaking secrets (gateway token, API keys)
 EOFNODE
 
 # ============================================================
@@ -301,7 +301,9 @@ echo "Dev mode: ${CLAWDBOT_DEV_MODE:-false}, Bind mode: $BIND_MODE"
 
 if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
     echo "Starting gateway with token auth..."
-    exec clawdbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$CLAWDBOT_GATEWAY_TOKEN"
+    # Token is already in config file (set by Node script above)
+    # Don't pass --token on CLI to avoid exposing in 'ps aux'
+    exec clawdbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"
 else
     echo "Starting gateway with device pairing (no token)..."
     exec clawdbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"

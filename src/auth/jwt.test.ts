@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { verifyAccessJWT } from './jwt';
+import { verifyAccessJWT, clearJWKSCache } from './jwt';
 
 // Mock the jose module
 vi.mock('jose', () => ({
@@ -10,6 +10,7 @@ vi.mock('jose', () => ({
 describe('verifyAccessJWT', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearJWKSCache(); // Clear cached JWKS between tests
   });
 
   it('calls jwtVerify with correct parameters', async () => {

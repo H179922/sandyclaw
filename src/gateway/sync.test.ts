@@ -60,14 +60,17 @@ describe('syncToR2', () => {
     it('returns success when sync completes', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       const timestamp = '2026-01-27T12:00:00+00:00';
-      
-      // Calls: mount check, sanity check, rsync, cat timestamp
+
+      // Calls: mount check, sanity check, rotate, rsync, manifest, write manifest, cat timestamp
       startProcessMock
-        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('ok'))
-        .mockResolvedValueOnce(createMockProcess(''))
-        .mockResolvedValueOnce(createMockProcess(timestamp));
-      
+        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n')) // mount check
+        .mockResolvedValueOnce(createMockProcess('ok')) // sanity check
+        .mockResolvedValueOnce(createMockProcess('')) // rotate backups
+        .mockResolvedValueOnce(createMockProcess('')) // rsync
+        .mockResolvedValueOnce(createMockProcess('clawdbot/clawdbot.json|abc123|100\n')) // manifest generation
+        .mockResolvedValueOnce(createMockProcess('')) // write manifest
+        .mockResolvedValueOnce(createMockProcess(timestamp)); // cat timestamp
+
       const env = createMockEnvWithR2();
 
       const result = await syncToR2(sandbox, env);
@@ -78,14 +81,17 @@ describe('syncToR2', () => {
 
     it('returns error when rsync fails (no timestamp created)', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
-      
-      // Calls: mount check, sanity check, rsync (fails), cat timestamp (empty)
+
+      // Calls: mount check, sanity check, rotate, rsync (fails), manifest, write manifest, cat timestamp (empty)
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
         .mockResolvedValueOnce(createMockProcess('ok'))
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 }))
-        .mockResolvedValueOnce(createMockProcess(''));
-      
+        .mockResolvedValueOnce(createMockProcess('')) // rotate
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })) // rsync fails
+        .mockResolvedValueOnce(createMockProcess('')) // manifest
+        .mockResolvedValueOnce(createMockProcess('')) // write manifest
+        .mockResolvedValueOnce(createMockProcess('')); // timestamp empty
+
       const env = createMockEnvWithR2();
 
       const result = await syncToR2(sandbox, env);
@@ -97,24 +103,50 @@ describe('syncToR2', () => {
     it('verifies rsync command is called with correct flags', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       const timestamp = '2026-01-27T12:00:00+00:00';
-      
+
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
         .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('')) // rotate
+        .mockResolvedValueOnce(createMockProcess('')) // rsync
+        .mockResolvedValueOnce(createMockProcess('clawdbot/clawdbot.json|abc123|100\n'))
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(timestamp));
-      
+
       const env = createMockEnvWithR2();
 
       await syncToR2(sandbox, env);
 
-      // Third call should be rsync (paths still use clawdbot internally)
-      const rsyncCall = startProcessMock.mock.calls[2][0];
+      // Fourth call (index 3) should be rsync (after mount, sanity, rotate)
+      const rsyncCall = startProcessMock.mock.calls[3][0];
       expect(rsyncCall).toContain('rsync');
       expect(rsyncCall).toContain('--no-times');
       expect(rsyncCall).toContain('--delete');
       expect(rsyncCall).toContain('/root/.clawdbot/');
       expect(rsyncCall).toContain('/data/moltbot/');
+    });
+
+    it('creates versioned backup before sync', async () => {
+      const { sandbox, startProcessMock } = createMockSandbox();
+      const timestamp = '2026-01-27T12:00:00+00:00';
+
+      startProcessMock
+        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
+        .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('')) // rotate
+        .mockResolvedValueOnce(createMockProcess('')) // rsync
+        .mockResolvedValueOnce(createMockProcess('clawdbot/clawdbot.json|abc123|100\n'))
+        .mockResolvedValueOnce(createMockProcess(''))
+        .mockResolvedValueOnce(createMockProcess(timestamp));
+
+      const env = createMockEnvWithR2();
+
+      await syncToR2(sandbox, env);
+
+      // Third call (index 2) should be rotate backup
+      const rotateCall = startProcessMock.mock.calls[2][0];
+      expect(rotateCall).toContain('clawdbot.prev');
+      expect(rotateCall).toContain('cp -a');
     });
   });
 });

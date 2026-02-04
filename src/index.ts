@@ -47,6 +47,82 @@ function transformErrorMessage(message: string, host: string): string {
   return message;
 }
 
+/**
+ * Known Moltbot RPC message types from the gateway.
+ * Messages not matching these patterns are logged and dropped for security.
+ */
+const ALLOWED_MESSAGE_TYPES = new Set([
+  // RPC responses
+  'result', 'error',
+  // Events
+  'event', 'notification',
+  // Connection
+  'connected', 'disconnected', 'ping', 'pong',
+  // Chat
+  'message', 'typing', 'presence',
+  // Device pairing
+  'pairing', 'paired', 'unpaired',
+  // Status
+  'status', 'ready', 'busy',
+]);
+
+/**
+ * Validate and sanitize WebSocket messages from the container.
+ * Returns null if the message should be dropped.
+ *
+ * SECURITY: Prevents a compromised container from sending arbitrary payloads
+ * to clients. Only known message types are forwarded.
+ */
+function validateContainerMessage(data: string, debugLogs: boolean): string | null {
+  try {
+    const parsed = JSON.parse(data);
+
+    // Must be an object
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      if (debugLogs) console.log('[WS] Dropping non-object message');
+      return null;
+    }
+
+    // Check for known message type patterns
+    const hasKnownType =
+      // Has a 'type' field with known value
+      (typeof parsed.type === 'string' && ALLOWED_MESSAGE_TYPES.has(parsed.type)) ||
+      // Has 'result' or 'error' field (RPC response)
+      ('result' in parsed || 'error' in parsed) ||
+      // Has 'id' field (RPC request/response)
+      ('id' in parsed && (typeof parsed.id === 'number' || typeof parsed.id === 'string')) ||
+      // Has 'method' field (RPC notification)
+      (typeof parsed.method === 'string');
+
+    if (!hasKnownType) {
+      console.warn('[WS] Dropping unknown message type:', Object.keys(parsed).slice(0, 5));
+      return null;
+    }
+
+    // Sanitize: remove any script tags or event handlers in string values
+    // This is defense-in-depth against XSS if client doesn't sanitize
+    const sanitized = JSON.stringify(parsed, (key, value) => {
+      if (typeof value === 'string') {
+        // Remove potential XSS vectors
+        return value
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '[removed]')
+          .replace(/on\w+\s*=/gi, 'data-removed=');
+      }
+      return value;
+    });
+
+    return sanitized;
+  } catch {
+    // Not valid JSON - could be binary or plain text
+    // For safety, only allow if it looks like a simple status message
+    if (data.length < 100 && /^[\w\s:.-]+$/.test(data)) {
+      return data;
+    }
+    if (debugLogs) console.log('[WS] Dropping unparseable message');
+    return null;
+  }
+}
+
 export { Sandbox };
 
 /**
@@ -318,34 +394,48 @@ app.all('*', async (c) => {
       }
     });
 
-    // Relay messages from container to client, with error transformation
+    // Relay messages from container to client, with validation and error transformation
     containerWs.addEventListener('message', (event) => {
       if (debugLogs) {
         console.log('[WS] Container -> Client (raw):', typeof event.data, typeof event.data === 'string' ? event.data.slice(0, 500) : '(binary)');
       }
-      let data = event.data;
+
+      // Handle binary data (pass through - typically media)
+      if (typeof event.data !== 'string') {
+        if (serverWs.readyState === WebSocket.OPEN) {
+          serverWs.send(event.data);
+        }
+        return;
+      }
+
+      // Validate and sanitize the message
+      const validated = validateContainerMessage(event.data, debugLogs);
+      if (validated === null) {
+        // Message dropped by validator
+        return;
+      }
+
+      let data = validated;
 
       // Try to intercept and transform error messages
-      if (typeof data === 'string') {
-        try {
-          const parsed = JSON.parse(data);
+      try {
+        const parsed = JSON.parse(data);
+        if (debugLogs) {
+          console.log('[WS] Parsed JSON, has error.message:', !!parsed.error?.message);
+        }
+        if (parsed.error?.message) {
           if (debugLogs) {
-            console.log('[WS] Parsed JSON, has error.message:', !!parsed.error?.message);
+            console.log('[WS] Original error.message:', parsed.error.message);
           }
-          if (parsed.error?.message) {
-            if (debugLogs) {
-              console.log('[WS] Original error.message:', parsed.error.message);
-            }
-            parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
-            if (debugLogs) {
-              console.log('[WS] Transformed error.message:', parsed.error.message);
-            }
-            data = JSON.stringify(parsed);
-          }
-        } catch (e) {
+          parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
           if (debugLogs) {
-            console.log('[WS] Not JSON or parse error:', e);
+            console.log('[WS] Transformed error.message:', parsed.error.message);
           }
+          data = JSON.stringify(parsed);
+        }
+      } catch (e) {
+        if (debugLogs) {
+          console.log('[WS] Not JSON or parse error:', e);
         }
       }
 
