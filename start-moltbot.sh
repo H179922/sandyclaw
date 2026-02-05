@@ -229,13 +229,18 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 const baseUrl = (process.env.AI_GATEWAY_BASE_URL || process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
 const isOpenAI = baseUrl.endsWith('/openai');
 
+// Build custom headers for AI Gateway authentication
+// OpenClaw uses 'headers' field for custom HTTP headers
+const gatewayAuthToken = process.env.AI_GATEWAY_AUTH_TOKEN;
+const gatewayHeaders = gatewayAuthToken ? { 'cf-aig-authorization': gatewayAuthToken } : undefined;
+
 if (isOpenAI) {
     // Create custom openai provider config with baseUrl override
     // Omit apiKey so moltbot falls back to OPENAI_API_KEY env var
     console.log('Configuring OpenAI provider with base URL:', baseUrl);
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
-    config.models.providers.openai = {
+    const openaiConfig = {
         baseUrl: baseUrl,
         api: 'openai-responses',
         models: [
@@ -244,6 +249,12 @@ if (isOpenAI) {
             { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
         ]
     };
+    // Add AI Gateway auth header if token is set
+    if (gatewayHeaders) {
+        openaiConfig.headers = gatewayHeaders;
+        console.log('AI Gateway authentication enabled');
+    }
+    config.models.providers.openai = openaiConfig;
     // Add models to the allowlist so they appear in /models
     config.agents.defaults.models = config.agents.defaults.models || {};
     config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
@@ -263,9 +274,19 @@ if (isOpenAI) {
             { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
         ]
     };
-    // Include API key in provider config if set (required when using custom baseUrl)
+    // Include API key if set (pass-through mode)
+    // In BYOK mode, the gateway has the key - we just need the auth header
     if (process.env.ANTHROPIC_API_KEY) {
         providerConfig.apiKey = process.env.ANTHROPIC_API_KEY;
+    }
+    // Add AI Gateway auth header if token is set (required for BYOK mode)
+    if (gatewayHeaders) {
+        providerConfig.headers = gatewayHeaders;
+        // In BYOK mode, use a placeholder key since gateway handles auth
+        if (!providerConfig.apiKey) {
+            providerConfig.apiKey = 'BYOK';  // Placeholder - gateway provides real key
+        }
+        console.log('AI Gateway authentication enabled (BYOK mode)');
     }
     config.models.providers.anthropic = providerConfig;
     // Add models to the allowlist so they appear in /models

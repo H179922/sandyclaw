@@ -62,10 +62,8 @@
       "bucket_name": "moltbot-data",
     },
   ],
-  // Cron trigger to sync moltbot data to R2 every 5 minutes
-  "triggers": {
-    "crons": ["*/5 * * * *"],
-  },
+  // Cron trigger disabled to allow container to sleep (saves ~$75/mo)
+  // To re-enable: "triggers": { "crons": ["0 */6 * * *"] },
   // Browser Rendering binding for CDP shim
   "browser": {
     "binding": "BROWSER",

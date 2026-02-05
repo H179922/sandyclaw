@@ -149,14 +149,18 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
   }
 
   // Check for AI Gateway or direct Anthropic configuration
-  if (env.AI_GATEWAY_API_KEY) {
-    // AI Gateway requires both API key and base URL
-    if (!env.AI_GATEWAY_BASE_URL) {
-      missing.push('AI_GATEWAY_BASE_URL (required when using AI_GATEWAY_API_KEY)');
+  // Supported configurations:
+  // 1. AI_GATEWAY_BASE_URL + AI_GATEWAY_AUTH_TOKEN (BYOK - key stored in gateway)
+  // 2. AI_GATEWAY_BASE_URL + AI_GATEWAY_API_KEY (pass-through mode)
+  // 3. ANTHROPIC_API_KEY (direct Anthropic access)
+  if (env.AI_GATEWAY_BASE_URL) {
+    // AI Gateway requires either auth token (BYOK) or API key (pass-through)
+    if (!env.AI_GATEWAY_AUTH_TOKEN && !env.AI_GATEWAY_API_KEY) {
+      missing.push('AI_GATEWAY_AUTH_TOKEN or AI_GATEWAY_API_KEY');
     }
   } else if (!env.ANTHROPIC_API_KEY) {
-    // Direct Anthropic access requires API key
-    missing.push('ANTHROPIC_API_KEY or AI_GATEWAY_API_KEY');
+    // Direct access requires API key
+    missing.push('ANTHROPIC_API_KEY or AI_GATEWAY_BASE_URL');
   }
 
   return missing;
